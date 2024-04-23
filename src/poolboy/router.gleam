@@ -1,4 +1,5 @@
 import gleam/http.{Get, Post}
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{Some}
@@ -7,15 +8,16 @@ import gleam/string_builder
 import nakai
 import poolboy/pages/home
 import poolboy/pages/pool_setup.{Form}
+import poolboy/pools
 import poolboy/web
 import wisp.{type Request, type Response}
 
-pub fn handle_request(req: Request) -> Response {
+pub fn handle_request(req: Request, ctx: web.Context) -> Response {
   use req <- web.middleware(req)
 
   case wisp.path_segments(req) {
     [] -> home(req)
-    ["pool", "setup"] -> pool_setup(req)
+    ["pool", "setup"] -> pool_setup(req, ctx)
     ["comments"] -> comments(req)
     ["comments", id] -> show_comment(req, id)
     _ -> wisp.not_found()
@@ -31,34 +33,50 @@ fn home(req: Request) -> Response {
   |> wisp.html_body(html)
 }
 
-fn pool_setup(req: Request) -> Response {
+fn pool_setup(req: Request, ctx: web.Context) -> Response {
   case req.method {
-    Get -> get_pool_setup(req)
-    Post -> post_pool_setup(req)
+    Get -> get_pool_setup(req, ctx)
+    Post -> post_pool_setup(req, ctx)
     _ -> wisp.method_not_allowed([Get, Post])
   }
 }
 
-fn get_pool_setup(_req: Request) -> Response {
+fn get_pool_setup(_req: Request, ctx: web.Context) -> Response {
   let html = pool_setup.render()
+
+  let res = pools.get_pools(ctx.db)
+  io.debug(res)
 
   wisp.ok()
   |> wisp.html_body(html)
 }
 
-fn post_pool_setup(req: Request) -> Response {
+fn post_pool_setup(req: Request, ctx: web.Context) -> Response {
   use formdata <- wisp.require_form(req)
-  io.debug(formdata)
 
   let form_parse = {
-    use volume <- result.try(list.key_find(formdata.values, "volume"))
+    use volume_str <- result.try(list.key_find(formdata.values, "volume"))
+    use volume <- result.try(int.parse(volume_str))
 
     Ok(volume)
   }
 
-  let volume = result.unwrap(form_parse, "")
+  let volume = result.unwrap(form_parse, 0)
 
-  let form_values = Form(volume: volume, error: Some("Volume is required."))
+  let create_result = pools.create_pool(volume, ctx.db)
+
+  // case create_result {
+  //   Error(e) -> {
+  //     io.debug(e)
+  //     ""
+  //   }
+  //   Ok(_) -> {
+  //     io.debug("success")
+  //     ""
+  //   }
+  // }
+
+  let form_values = Form(volume: "", error: Some("Volume is required."))
 
   let html =
     form_values
